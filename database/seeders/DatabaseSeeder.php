@@ -11,6 +11,10 @@ class DatabaseSeeder extends Seeder
         $this->call([
             \Database\Seeders\CategorySeeder::class,
             \Database\Seeders\RegionSeeder::class,
+        CategorySeeder::class,
+        RegionSeeder::class,
+        DemoSeeder::class,
+        AdminSeeder::class,   // 👈 Asegúrate de incluirlo
         ]);
 
         // ❌ Sin ventas demo. Quedan solo cat/region.
