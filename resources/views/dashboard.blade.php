@@ -127,7 +127,7 @@
             </div>
 
             {{-- ============================
-                 Gráficas
+                 Gráficas (fila superior)
                  - #chart:  barras ↔ línea (auto) ventas por mes
                  - #pieChart: pie participación por categoría
                ============================ --}}
@@ -142,6 +142,20 @@
                     <h3 class="mb-3 text-gray-700 font-medium">Participación por categoría</h3>
                     <canvas id="pieChart" height="160"></canvas>
                     {{-- Cada categoría tiene color distinto (ver paleta en dashboard.js) --}}
+                </div>
+            </div>
+
+            {{-- ============================
+                 (NUEVA) Gráfica de PUNTOS (debajo)
+                 Muestra la MISMA información que el pie (participación por categoría),
+                 pero como puntos categóricos para lectura rápida.
+                 ID: #scatterChart (lo usa dashboard.js)
+               ============================ --}}
+            <div class="mt-6">
+                <div class="rounded-xl border bg-white p-5 shadow-sm">
+                    <h3 class="mb-3 text-gray-700 font-medium">Participación por categoría (puntos)</h3>
+                    <canvas id="scatterChart" height="160"></canvas>
+                    {{-- Alimentada desde dashboard.js, reutiliza labels/values del pie --}}
                 </div>
             </div>
 

@@ -1,80 +1,75 @@
 // resources/js/dashboard.js
 // ------------------------------------------------------------
-// Dashboard: filtros, KPIs, gráficas y exportación CSV.
-// - Paletas de color por punto
-// - "Motor" auto-chart: cambia bar <-> line según # de puntos
-// - Filtros adicionales: amount_min / amount_max
-// - Tolerante a nombres de KPIs (revenue|ventas_hoy, tickets|ordenes)
+// Lógica del Dashboard: filtros, KPIs, gráficas y exportación CSV
 // ------------------------------------------------------------
-
 import { Chart } from "chart.js/auto";
 
 /* ============================
-   🎨 Paletas de color
+   Helpers y referencias al DOM
    ============================ */
-const BAR_COLORS = [
-  "#2563eb", "#16a34a", "#f59e0b", "#ef4444", "#8b5cf6",
-  "#06b6d4", "#f97316", "#22c55e", "#e11d48", "#0ea5e9",
-];
-const PIE_COLORS = [
-  "#60a5fa", "#34d399", "#fbbf24", "#f87171", "#a78bfa",
-  "#2dd4bf", "#fb923c", "#86efac", "#f472b6", "#93c5fd",
-];
+const $ = (sel) => document.querySelector(sel);
 
-/* ============================
-   DOM
-   ============================ */
-const $ = (s) => document.querySelector(s);
-
+// Filtros (los IDs deben coincidir con el Blade)
 const $start    = $("#start");
 const $end      = $("#end");
 const $cat      = $("#category_id");
 const $reg      = $("#region_id");
-const $min      = $("#amount_min");   // 👈 nuevo
-const $max      = $("#amount_max");   // 👈 nuevo
+const $min      = $("#amount_min");         // 👈 si no existen en tu vista, no pasa nada
+const $max      = $("#amount_max");         // 👈 idem
 const $btnApply = $("#btn-aplicar");
 const $btnCsv   = $("#btn-csv");
 
-const $barCanvas = $("#chart");
-const $pieCanvas = $("#pieChart");
+// Canvases para Chart.js
+const $barCanvas     = $("#chart");        // barras / línea (ventas por mes)
+const $pieCanvas     = $("#pieChart");     // pie (participación por categoría)
+const $scatterCanvas = $("#scatterChart"); // 👈 NUEVO: puntos (misma data que pie)
 
 /* ============================
-   Utils
+   Utilidades
    ============================ */
-(function setDefaultDates(){
+
+// Fechas por defecto: últimos 30 días
+(function setDefaultDates() {
+  if (!$start || !$end) return;
   const end = new Date();
   const start = new Date();
   start.setDate(end.getDate() - 30);
-  const fmt = (d) => d.toISOString().slice(0,10);
+  const fmt = (d) => d.toISOString().slice(0, 10);
   $start.value = fmt(start);
   $end.value   = fmt(end);
 })();
+
+// Formateo de moneda
 const fmtMoney = (n) =>
   new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n ?? 0);
 
+// Validar/forzar JSON (si backend retorna HTML 404/500 lanza error comprensible)
 async function safeJson(response) {
   const ct = response.headers.get("content-type") || "";
   if (!ct.includes("application/json")) {
     const text = await response.text();
-    throw new Error("Respuesta NO JSON (¿404/500?):\n" + text.slice(0, 600));
+    throw new Error("Respuesta NO JSON (¿404/500?):\n" + text.slice(0, 500));
   }
   return response.json();
 }
+
+// Construir query actual
 function buildQuery() {
   const p = new URLSearchParams();
-  if ($start.value) p.set("start", $start.value);
-  if ($end.value)   p.set("end",   $end.value);
-  if ($cat.value)   p.set("category_id", $cat.value);
-  if ($reg.value)   p.set("region_id",   $reg.value);
-  if ($min?.value)  p.set("amount_min",  $min.value);
-  if ($max?.value)  p.set("amount_max",  $max.value);
+  if ($start?.value) p.set("start", $start.value);
+  if ($end?.value)   p.set("end",   $end.value);
+  if ($cat?.value)   p.set("category_id", $cat.value);
+  if ($reg?.value)   p.set("region_id",   $reg.value);
+  if ($min?.value)   p.set("amount_min",  $min.value);
+  if ($max?.value)   p.set("amount_max",  $max.value);
   return p.toString();
 }
 
 /* ============================
-   Filtros dinámicos
+   Carga de filtros
    ============================ */
 async function loadFilters() {
+  if (!$cat || !$reg) return; // si los selects no existen, salta
   const [catRes, regRes] = await Promise.all([
     fetch("/api/filters/categories"),
     fetch("/api/filters/regions"),
@@ -84,116 +79,167 @@ async function loadFilters() {
   $cat.innerHTML = `<option value="">Todas</option>`;
   $reg.innerHTML = `<option value="">Todas</option>`;
 
+  // Asumimos objetos {id, name}; ajusta si tu API regresa otro formato
   cats.forEach((c) => {
-    const o = document.createElement("option");
-    // Espera {id, name}. Si tu API fuera sólo strings, usa: o.value = o.textContent = c;
-    o.value = c.id ?? c.value ?? c;
-    o.textContent = c.name ?? c.label ?? c;
-    $cat.appendChild(o);
+    const opt = document.createElement("option");
+    opt.value = c.id ?? c;
+    opt.textContent = c.name ?? String(c);
+    $cat.appendChild(opt);
   });
+
   regs.forEach((r) => {
-    const o = document.createElement("option");
-    o.value = r.id ?? r.value ?? r;
-    o.textContent = r.name ?? r.label ?? r;
-    $reg.appendChild(o);
+    const opt = document.createElement("option");
+    opt.value = r.id ?? r;
+    opt.textContent = r.name ?? String(r);
+    $reg.appendChild(opt);
   });
 }
 
 /* ============================
-   Charts
+   Gráficas
    ============================ */
 let barChart = null;
 let pieChart = null;
+let scatterChart = null;
 
-function createBarOrLineChart(type, labels, values) {
-  return new Chart($barCanvas, {
-    type,
-    data: {
-      labels,
-      datasets: [{
-        label: "Ventas ($)",
-        data: values,
-        backgroundColor: values.map((_, i) => BAR_COLORS[i % BAR_COLORS.length]),
-        borderColor: "#2563eb",
-        tension: 0.3,
-        fill: type === "line" ? false : true,
-      }],
-    },
-    options: { responsive: true, scales: { y: { beginAtZero: true } } },
-  });
+// Paleta de colores (estable y suficiente para varias categorías)
+const COLORS = [
+  "#2563eb","#16a34a","#f59e0b","#ef4444","#8b5cf6",
+  "#06b6d4","#f97316","#84cc16","#ec4899","#10b981",
+  "#4f46e5","#22c55e","#eab308","#dc2626","#a855f7",
+];
+
+function colorAt(i) {
+  return COLORS[i % COLORS.length];
 }
+
 function ensureCharts() {
-  if (!barChart) barChart = createBarOrLineChart("bar", [], []);
-  if (!pieChart) {
+  // Barras / línea (ventas por mes)
+  if (!barChart && $barCanvas) {
+    barChart = new Chart($barCanvas, {
+      type: "bar",
+      data: { labels: [], datasets: [{ label: "Ventas ($)", data: [] }] },
+      options: {
+        responsive: true,
+        scales: { y: { beginAtZero: true } },
+        plugins: { legend: { display: false } },
+      },
+    });
+  }
+
+  // Pie (participación por categoría)
+  if (!pieChart && $pieCanvas) {
     pieChart = new Chart($pieCanvas, {
       type: "pie",
       data: { labels: [], datasets: [{ data: [], backgroundColor: [] }] },
       options: { responsive: true },
     });
   }
+
+  // 👇 NUEVO: Puntos (misma data del pie). Usamos chart 'line' con showLine:false
+  // para tener un scatter categórico (eje X por categorías).
+  if (!scatterChart && $scatterCanvas) {
+    scatterChart = new Chart($scatterCanvas, {
+      type: "line",
+      data: { labels: [], datasets: [{
+        label: "Participación ($)",
+        data: [],
+        showLine: false,      // ⬅ sin línea, solo puntos
+        pointRadius: 6,       // tamaño del punto
+        pointHoverRadius: 8,  // hover más visible
+        pointBackgroundColor: [], // colores por punto (match con pie)
+        pointBorderWidth: 1,
+      }]},
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false }, tooltip: { mode: "nearest" } },
+        scales: {
+          y: { beginAtZero: true, ticks: { callback: (v) => v } },
+          // X es categórico (usa labels = nombres de categoría)
+        },
+      },
+    });
+  }
 }
 
 /* ============================
-   Carga KPIs + series
+   KPIs + Datos + Pintado
    ============================ */
 async function loadData() {
   const query = buildQuery();
+
   const [kpiRes, monthRes, shareRes] = await Promise.all([
     fetch("/api/stats/kpis?" + query),
     fetch("/api/stats/sales-by-month?" + query),
     fetch("/api/stats/sales-share-by-category?" + query),
   ]);
+
   const kpis   = await safeJson(kpiRes);
-  const months = await safeJson(monthRes); // {labels, data} o {labels, values}
-  const share  = await safeJson(shareRes); // {labels, data} o array [{category,total}]
+  const months = await safeJson(monthRes); // { labels: [...], data/values: [...] }
+  const share  = await safeJson(shareRes); // { labels: [...], data: [...] } o array
 
-  // KPIs (acepta nombres alternos por compatibilidad)
-  const revenue = kpis.revenue ?? kpis.ventas_hoy ?? 0;
-  const tickets = kpis.tickets ?? kpis.ordenes ?? 0;
-  const avg     = kpis.avg_ticket ?? 0;
+  // KPIs
+  $("#kpiVentasHoy") && ($("#kpiVentasHoy").textContent = fmtMoney(kpis.ventas_hoy ?? kpis.revenue ?? 0));
+  $("#kpiOrdenes")   && ($("#kpiOrdenes").textContent   = String(kpis.ordenes ?? kpis.tickets ?? 0));
+  $("#kpiAvg")       && ($("#kpiAvg").textContent       = fmtMoney(kpis.avg_ticket ?? 0));
 
-  $("#kpiVentasHoy").textContent = fmtMoney(revenue);
-  $("#kpiOrdenes").textContent   = String(tickets);
-  $("#kpiAvg").textContent       = fmtMoney(avg);
-
-  // === Ventas por mes (motor auto-chart) ===
-  ensureCharts();
-
+  // Normaliza monthly
   const mLabels = months.labels ?? months.months ?? [];
-  const mValues = months.data   ?? months.values ?? [];
+  const mData   = months.data   ?? months.values ?? [];
 
-  const desired = (mValues.length >= 6) ? "line" : "bar";
-  if (barChart.config.type !== desired) {
-    barChart.destroy();
-    barChart = createBarOrLineChart(desired, mLabels, mValues);
+  // Normaliza share (puede venir como objetos [{category,total}] o como {labels,data})
+  let pieLabels, pieValues;
+  if (Array.isArray(share)) {
+    pieLabels = share.map(x => x.category ?? x.name ?? "N/D");
+    pieValues = share.map(x => Number(x.total ?? 0));
   } else {
-    barChart.data.labels = mLabels;
-    barChart.data.datasets[0].data = mValues;
-    barChart.data.datasets[0].backgroundColor =
-      mValues.map((_, i) => BAR_COLORS[i % BAR_COLORS.length]);
-    barChart.update();
+    pieLabels = share.labels ?? [];
+    pieValues = share.data   ?? share.values ?? [];
   }
 
-  // === Participación por categoría (pie) ===
-  const pieLabels = Array.isArray(share)
-    ? share.map(x => x.category ?? x.name ?? "N/D")
-    : (share.labels ?? []);
-  const pieValues = Array.isArray(share)
-    ? share.map(x => Number(x.total ?? 0))
-    : (share.data ?? share.values ?? []);
+  ensureCharts();
 
-  pieChart.data.labels = pieLabels;
-  pieChart.data.datasets[0].data = pieValues;
-  pieChart.data.datasets[0].backgroundColor =
-    pieLabels.map((_, i) => PIE_COLORS[i % PIE_COLORS.length]);
-  pieChart.update();
+  // === Ventas por mes: si hay >=6 puntos, pasa a tipo 'line'; si no, 'bar'
+  if (barChart) {
+    const manyPoints = (mData?.length ?? 0) >= 6;
+    if (barChart.config.type !== (manyPoints ? "line" : "bar")) {
+      barChart.destroy();
+      barChart = new Chart($barCanvas, {
+        type: manyPoints ? "line" : "bar",
+        data: { labels: mLabels, datasets: [{ label: "Ventas ($)", data: mData, backgroundColor: "#2563eb" }] },
+        options: { responsive: true, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } },
+      });
+    } else {
+      barChart.data.labels = mLabels;
+      barChart.data.datasets[0].data = mData;
+      barChart.update();
+    }
+  }
+
+  // === Pie: colores por porción
+  if (pieChart) {
+    pieChart.data.labels = pieLabels;
+    pieChart.data.datasets[0].data = pieValues;
+    pieChart.data.datasets[0].backgroundColor = pieLabels.map((_, i) => colorAt(i));
+    pieChart.update();
+  }
+
+  // === (NUEVO) Puntos: mismas labels/values del pie
+  // Usamos 'line' sin línea para puntos categóricos en X.
+  if (scatterChart) {
+    scatterChart.data.labels = pieLabels;                // eje X con nombres de categoría
+    scatterChart.data.datasets[0].data = pieValues;      // valores en Y
+    scatterChart.data.datasets[0].pointBackgroundColor = pieLabels.map((_, i) => colorAt(i)); // mismo color que el pie
+    scatterChart.update();
+  }
 }
 
 /* ============================
    Exportación CSV
    ============================ */
 function exportCsv() {
-  window.location.href = "/reportes/export-csv?" + buildQuery();
+  const url = "/reportes/export-csv?" + buildQuery();
+  window.location.href = url;
 }
 
 /* ============================
@@ -202,6 +248,7 @@ function exportCsv() {
 $btnApply?.addEventListener("click", () => {
   loadData().catch(console.error);
 });
+
 $btnCsv?.addEventListener("click", (e) => {
   e.preventDefault();
   exportCsv();
