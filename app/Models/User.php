@@ -13,9 +13,10 @@ class User extends Authenticatable
     use HasFactory, Notifiable;
 
     /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
+     * Atributos asignables masivamente.
+     * NOTA: Por seguridad, NO incluimos 'is_admin' aquí.
+     *       Así evitamos que un usuario se autoconceda admin vía forms comunes.
+     *       El flag de admin lo setea explícitamente un admin (p.ej. en seeder o panel de admin).
      */
     protected $fillable = [
         'name',
@@ -24,9 +25,7 @@ class User extends Authenticatable
     ];
 
     /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
+     * Atributos ocultos en serialización.
      */
     protected $hidden = [
         'password',
@@ -34,15 +33,22 @@ class User extends Authenticatable
     ];
 
     /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
+     * Casts de atributos.
+     * - 'is_admin' como booleano para poder usar $user->is_admin directamente.
+     * - 'password' => 'hashed' (Laravel se encarga de hashear al asignar).
      */
-    protected function casts(): array
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+        'password'          => 'hashed',
+        'is_admin'          => 'boolean', // 👈 MUY IMPORTANTE para el middleware/admin
+    ];
+
+    /**
+     * Helper de conveniencia: $user->isAdmin()
+     * (Opcional, pero cómodo para checks en Blade/controladores)
+     */
+    public function isAdmin(): bool
     {
-        return [
-            'email_verified_at' => 'datetime',
-            'password' => 'hashed',
-        ];
+        return (bool) $this->is_admin;
     }
 }
