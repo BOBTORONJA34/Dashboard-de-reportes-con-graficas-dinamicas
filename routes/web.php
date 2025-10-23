@@ -35,6 +35,10 @@ Route::middleware('auth')->group(function () {
     Route::get('/reportes/export-csv', [DashboardController::class, 'exportCsv'])
         ->name('reportes.csv');
 
+    // Importación CSV (sube ventas desde el dashboard)
+    Route::post('/reportes/import-csv', [DashboardController::class, 'importCsv'])
+        ->name('reportes.import');
+
     // Ventas (solo crear y guardar). La vista usa <x-app-layout> (Breeze).
     Route::resource('sales', SaleController::class)
         ->only(['create', 'store']);

@@ -22,6 +22,17 @@
                 </div>
             @endif
 
+            @if ($importErrors = session('import_errors'))
+                <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800">
+                    <p class="font-semibold mb-2">Algunas filas no se importaron:</p>
+                    <ul class="list-disc list-inside space-y-1 text-sm">
+                        @foreach ($importErrors as $error)
+                            <li>{{ $error }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+            @endif
+
             {{-- ============================
                  KPIs (indicadores rápidos)
                  * Los valores se pintan desde resources/js/dashboard.js
@@ -122,6 +133,28 @@
                                 Nueva venta
                             </a>
                         @endauth
+                    </div>
+
+                    <div class="md:col-span-6">
+                        <form action="{{ route('reportes.import') }}" method="POST" enctype="multipart/form-data"
+                              class="flex flex-col gap-3 sm:flex-row sm:items-end">
+                            @csrf
+                            <div class="flex-1">
+                                <label for="csv" class="block text-sm text-gray-600 mb-1">Importar CSV</label>
+                                <input type="file" name="csv" id="csv" accept=".csv,text/csv"
+                                       class="block w-full text-sm text-gray-700 file:mr-4 file:rounded-md file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-emerald-700 hover:file:bg-emerald-100"
+                                       required>
+                            </div>
+                            <div>
+                                <button type="submit"
+                                        class="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-700">
+                                    Subir ventas
+                                </button>
+                            </div>
+                        </form>
+                        @error('csv')
+                            <p class="mt-2 text-sm text-red-600">{{ $message }}</p>
+                        @enderror
                     </div>
                 </div>
             </div>
